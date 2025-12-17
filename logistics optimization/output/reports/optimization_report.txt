@@ -1,4 +1,0 @@
-Starting optimization...
-
-Optimization process finished.
-========================================
