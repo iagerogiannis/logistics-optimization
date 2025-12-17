@@ -19,6 +19,7 @@ import pandas as pd
 import sys
 import traceback
 import warnings
+from .save_locations_json import save_locations_json
 
 # Constants for Earth radius in kilometers
 EARTH_RADIUS_KM = 6371.0
@@ -204,6 +205,7 @@ def generate_locations(num_logistics_centers: int, num_sales_outlets: int, num_c
     if num_customers > 0 and len(generated_points['customers']) != num_customers:
          warnings.warn(f"Requested {num_customers} customers but only generated {len(generated_points['customers'])}.")
 
+    save_locations_json(generated_points)
 
     return generated_points
 
