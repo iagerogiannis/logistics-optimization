@@ -155,7 +155,10 @@ try:
     # from core.problem_utils import SolutionCandidate # Example if needed
 
     from data.data_generator import generate_locations, generate_demand
+    from data.load_locations_json import load_locations_from_json, get_location_counts
     _DATA_GENERATOR_AVAILABLE = True
+    _LOCATIONS_LOADER_AVAILABLE = True
+
     logger.info("data.data_generator imported.")
 
     # Import visualization components
@@ -427,20 +430,27 @@ class MainWindow(tk.Tk):
         data_action_frame.grid(row=current_row, column=0, sticky="ew", padx=5, pady=5)
         data_action_frame.grid_columnconfigure(0, weight=1)
         data_action_frame.grid_columnconfigure(1, weight=1)
-        data_action_frame.grid_columnconfigure(2, weight=1)
         current_row += 1
 
         style = ttk.Style()
-        style.configure("Accent.TButton", font=('Segoe UI', 9, 'bold'), foreground="white", background="#0078D4") # Example accent style
+        style.configure("Accent.TButton", font=('Segoe UI', 9, 'bold'), foreground="white", background="#0078D4")
 
+        # First row: Generate buttons
         self.generate_button = create_button(data_action_frame, "Generate Data", self._generate_data, 0, 0, sticky="ew", padx=(0,2))
         gen_btn_state = tk.DISABLED if not _DATA_GENERATOR_AVAILABLE else tk.NORMAL
         self.generate_button.config(state=gen_btn_state)
         try: self.generate_button.configure(style="Accent.TButton")
-        except tk.TclError: pass # Ignore style errors if theme doesn't support it
+        except tk.TclError: pass
 
-        self.load_config_button = create_button(data_action_frame, "Load Config", self._load_config_dialog, 0, 1, sticky="ew", padx=2)
-        self.save_config_button = create_button(data_action_frame, "Save Config", self._save_config_dialog, 0, 2, sticky="ew", padx=(2,0))
+        self.generate_with_locations_button = create_button(data_action_frame, "Generate with Locations", self._generate_data_with_input_locations, 0, 1, sticky="ew", padx=(2,0))
+        gen_with_loc_btn_state = tk.DISABLED if not (_DATA_GENERATOR_AVAILABLE and _LOCATIONS_LOADER_AVAILABLE) else tk.NORMAL
+        self.generate_with_locations_button.config(state=gen_with_loc_btn_state)
+        try: self.generate_with_locations_button.configure(style="Accent.TButton")
+        except tk.TclError: pass
+
+        # Second row: Config buttons
+        self.load_config_button = create_button(data_action_frame, "Load Config", self._load_config_dialog, 1, 0, sticky="ew", padx=(0,2))
+        self.save_config_button = create_button(data_action_frame, "Save Config", self._save_config_dialog, 1, 1, sticky="ew", padx=(2,0))
 
         self.create_algorithm_selection_widgets(self.scrollable_frame, current_row)
         current_row += 1
@@ -1234,6 +1244,127 @@ class MainWindow(tk.Tk):
         finally:
             self._enable_gui_elements()
 
+    def _generate_data_with_input_locations(self):
+        """Triggers data generation with custom locations loaded from JSON file."""
+        logger.info("Starting data generation with locations input from file...")
+        if not _DATA_GENERATOR_AVAILABLE:
+            messagebox.showerror("Error", "Data generation functions are not available.", parent=self, icon='error')
+            return
+        
+        if not _LOCATIONS_LOADER_AVAILABLE:
+            messagebox.showerror("Error", "JSON location loader is not available.", parent=self, icon='error')
+            return
+
+        # Open file dialog to select JSON file
+        json_filepath = filedialog.askopenfilename(
+            parent=self,
+            title="Select Locations JSON File",
+            initialdir=os.path.join(project_root, 'data'),  # Start in data directory
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if not json_filepath:
+            logger.info("Location file selection cancelled by user.")
+            self.status_var.set("Ready (File selection cancelled)")
+            return
+
+        self._disable_gui_elements(running_data_gen=True)
+        self.status_var.set("Loading locations from file...")
+        self.update_idletasks()
+
+        # Get relevant parameters (for demand generation)
+        all_params = self._get_all_parameters()
+        if all_params is None:  # Validation failed
+            self._enable_gui_elements()
+            self.status_var.set("Ready (Parameter Error)")
+            return
+
+        data_params = all_params.get('problem_data_params', {})
+
+        try:
+            # Load locations from JSON file
+            logger.info(f"Loading locations from: {json_filepath}")
+            generated_locations = load_locations_from_json(json_filepath)
+            
+            if not generated_locations or not isinstance(generated_locations, dict):
+                raise RuntimeError("Location loading failed or returned invalid structure.")
+            
+            if not generated_locations.get("logistics_centers"):
+                raise ValueError("No logistics centers found in the JSON file. At least one is required.")
+            
+            logger.info("Location data loaded from JSON file.")
+            
+            # Get actual counts from loaded data
+            location_counts = get_location_counts(generated_locations)
+            num_customers = location_counts['num_customers']
+            
+            logger.info(f"Loaded: {location_counts['num_logistics_centers']} logistics centers, "
+                    f"{location_counts['num_sales_outlets']} sales outlets, "
+                    f"{num_customers} customers")
+
+            # Generate demands for the loaded customers
+            logger.info("Calling data_generator.generate_demand...")
+            if num_customers > 0:
+                generated_demands = generate_demand(
+                    num_customers=num_customers,
+                    min_demand=data_params.get('min_demand', 0.0),
+                    max_demand=data_params.get('max_demand', 0.0)
+                )
+                if generated_demands is None:
+                    raise RuntimeError("Demand generation failed (returned None).")
+            else:
+                generated_demands = []  # No customers, no demands
+                logger.warning("No customers found in JSON file. Demands list will be empty.")
+            
+            logger.info("Demand data generated.")
+
+            # Store Generated Data
+            self.current_problem_data = {
+                'locations': generated_locations,
+                'demands': generated_demands
+            }
+            logger.info("Problem data loaded and stored (from JSON file).")
+
+            # Reset Previous Results
+            self.current_optimization_results = None
+            self._clear_results_display()
+
+            # Update GUI
+            self.status_var.set("Data Loaded Successfully from JSON. Ready to Run Optimization.")
+            messagebox.showinfo(
+                "Data Generation", 
+                f"Locations loaded successfully from:\n{os.path.basename(json_filepath)}\n\n"
+                f"Logistics Centers: {location_counts['num_logistics_centers']}\n"
+                f"Sales Outlets: {location_counts['num_sales_outlets']}\n"
+                f"Customers: {num_customers}",
+                parent=self
+            )
+
+            # Display loaded points on map (if map generator works)
+            self._display_generated_data_map()
+
+        except FileNotFoundError as fnf:
+            logger.error(f"File not found: {fnf}", exc_info=True)
+            messagebox.showerror("File Error", f"Location file not found:\n{json_filepath}", parent=self, icon='error')
+            self.status_var.set("Ready (File Not Found)")
+        except json.JSONDecodeError as jde:
+            logger.error(f"JSON decode error: {jde}", exc_info=True)
+            messagebox.showerror("JSON Error", f"Invalid JSON format in file:\n{json_filepath}\n\nError: {jde}", parent=self, icon='error')
+            self.status_var.set("Ready (Invalid JSON)")
+        except ValueError as ve:
+            logger.error(f"Validation error loading locations: {ve}", exc_info=True)
+            messagebox.showerror("Validation Error", f"Invalid location data:\n{ve}", parent=self, icon='error')
+            self.status_var.set("Ready (Data Validation Error)")
+        except Exception as e:
+            logger.error(f"An error occurred during data loading from JSON: {e}", exc_info=True)
+            messagebox.showerror("Generation Error", f"An error occurred loading locations:\n{e}", parent=self, icon='error')
+            self.status_var.set("Ready (Data Load Error)")
+        finally:
+            self._enable_gui_elements()
+
 
     def _display_generated_data_map(self):
          """Displays the generated locations using the map generator."""
@@ -1364,9 +1495,10 @@ class MainWindow(tk.Tk):
          """Disables GUI elements during processing."""
          logger.debug("Disabling GUI elements.")
          widgets_to_disable = [
-             self.generate_button, self.load_config_button, self.save_config_button,
+             self.generate_button, self.generate_with_locations_button, 
+             self.load_config_button, self.save_config_button,
              self.run_button, self.param_notebook, self.algo_params_notebook
-             ]
+        ]
          # Disable algorithm selection checkboxes
          if hasattr(self, 'algo_frame'):
               for child in self.algo_frame.winfo_children():
@@ -1401,13 +1533,19 @@ class MainWindow(tk.Tk):
              self.load_config_button, self.save_config_button,
              self.param_notebook, self.algo_params_notebook
              ]
-         # Enable generate button only if data generator is available
+         # Enable generate buttons only if data generator is available
          if hasattr(self, 'generate_button'):
              gen_btn_state = tk.DISABLED if not _DATA_GENERATOR_AVAILABLE else tk.NORMAL
              try: self.generate_button.config(state=gen_btn_state)
              except tk.TclError: pass
              widgets_to_enable.append(self.generate_button)
 
+         if hasattr(self, 'generate_with_locations_button'):
+             gen_with_loc_btn_state = tk.DISABLED if not (_DATA_GENERATOR_AVAILABLE and  _LOCATIONS_LOADER_AVAILABLE) else tk.NORMAL
+             try: self.generate_with_locations_button.config(state=gen_with_loc_btn_state)
+             except tk.TclError: pass
+             widgets_to_enable.append(self.generate_with_locations_button)
+ 
          # Enable checkboxes in algo_frame if algorithms are loaded
          if hasattr(self, 'algo_frame'):
               for child in self.algo_frame.winfo_children():
