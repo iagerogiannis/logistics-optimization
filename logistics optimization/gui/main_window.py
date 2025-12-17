@@ -430,28 +430,27 @@ class MainWindow(tk.Tk):
         data_action_frame.grid(row=current_row, column=0, sticky="ew", padx=5, pady=5)
         data_action_frame.grid_columnconfigure(0, weight=1)
         data_action_frame.grid_columnconfigure(1, weight=1)
-        data_action_frame.grid_columnconfigure(2, weight=1)
-        data_action_frame.grid_columnconfigure(3, weight=1)  # Added for new button
         current_row += 1
 
         style = ttk.Style()
         style.configure("Accent.TButton", font=('Segoe UI', 9, 'bold'), foreground="white", background="#0078D4")
 
+        # First row: Generate buttons
         self.generate_button = create_button(data_action_frame, "Generate Data", self._generate_data, 0, 0, sticky="ew", padx=(0,2))
         gen_btn_state = tk.DISABLED if not _DATA_GENERATOR_AVAILABLE else tk.NORMAL
         self.generate_button.config(state=gen_btn_state)
         try: self.generate_button.configure(style="Accent.TButton")
         except tk.TclError: pass
 
-        # New button for generate data with locations input
-        self.generate_with_locations_button = create_button(data_action_frame, "Generate with Locations", self._generate_data_with_input_locations, 1, 0, sticky="ew", padx=(0,2))
+        self.generate_with_locations_button = create_button(data_action_frame, "Generate with Locations", self._generate_data_with_input_locations, 0, 1, sticky="ew", padx=(2,0))
         gen_with_loc_btn_state = tk.DISABLED if not (_DATA_GENERATOR_AVAILABLE and _LOCATIONS_LOADER_AVAILABLE) else tk.NORMAL
         self.generate_with_locations_button.config(state=gen_with_loc_btn_state)
         try: self.generate_with_locations_button.configure(style="Accent.TButton")
         except tk.TclError: pass
 
-        self.load_config_button = create_button(data_action_frame, "Load Config", self._load_config_dialog, 1, 1, sticky="ew", padx=2)
-        self.save_config_button = create_button(data_action_frame, "Save Config", self._save_config_dialog, 1, 2, sticky="ew", padx=(2,0))
+        # Second row: Config buttons
+        self.load_config_button = create_button(data_action_frame, "Load Config", self._load_config_dialog, 1, 0, sticky="ew", padx=(0,2))
+        self.save_config_button = create_button(data_action_frame, "Save Config", self._save_config_dialog, 1, 1, sticky="ew", padx=(2,0))
 
         self.create_algorithm_selection_widgets(self.scrollable_frame, current_row)
         current_row += 1
